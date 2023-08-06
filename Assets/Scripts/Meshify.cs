@@ -9,18 +9,22 @@ public partial class Meshify : EditorWindow
 {
     private const float DEFAULT_Y_OFFSET = 200;
 
-    private bool _showBoxes;
+    private int _drawStyle;
     private bool _showWireFrame;
     private float _xOffset;
     private int _scale = 1;
     private Texture2D _texture;
     private Color[,] _imageColorGrid;
+    private Color[,] _textureColorGrid;
     private Color[,] _boxColorGrid;
     private PixelArea[] _areas = Array.Empty<PixelArea>();
 
     private int _triCount;
     private int _pixelCount;
     
+    private Texture2D _textureLastFrame;
+
+
     [MenuItem("Window/Meshify")]
     private static void Init()
     {
@@ -33,37 +37,44 @@ public partial class Meshify : EditorWindow
         EditorGUI.BeginChangeCheck();
         _scale = (int)EditorGUILayout.Slider("Scale", _scale, 1, 100);
         _showWireFrame = EditorGUILayout.Toggle("Show Wire frame", _showWireFrame);
-        _showBoxes = EditorGUILayout.Toggle("Show boxes", _showBoxes);
+        _drawStyle = EditorGUILayout.Popup("Draw Style", _drawStyle, Enum.GetNames(typeof(DrawStyle)));
         _texture = (Texture2D)EditorGUILayout.ObjectField("Texture2D", _texture, typeof(Texture2D), allowSceneObjects: true);
         
-        if (EditorGUI.EndChangeCheck())
+        if (EditorGUI.EndChangeCheck() && _texture)
         {
             ResetImage();
             _areas = GetAreas();
         }
-        
-        
+
+
         Draw();
+
         
         EditorGUILayout.HelpBox($"{_triCount} tris\n {_pixelCount} pixel count", MessageType.Info);
     }
 
     private void Draw()
     {
-        Color[,] selectedGrid;
-        
-        if (_showBoxes)
+        Color[,] selectedGrid = _imageColorGrid;
+
+        switch ((DrawStyle)_drawStyle)
         {
-            DrawAreas();
-            selectedGrid = _boxColorGrid;
+            case DrawStyle.None:
+                selectedGrid = null;
+                break;
+            case DrawStyle.Texture:
+                selectedGrid = _textureColorGrid;
+                break;
+            case DrawStyle.Solid:
+                DrawAreasByColor();
+                selectedGrid = _boxColorGrid;
+                break;
+            default:
+                break;
         }
-        else
-        {
-            selectedGrid = _imageColorGrid;
-        }
-        
+
         DrawImage(selectedGrid);
-        
+
         if (_showWireFrame)
         {
             DrawMeshLines();
@@ -79,26 +90,27 @@ public partial class Meshify : EditorWindow
             Vector2 xyScaleOffset = xScaleOffset + yScaleOffset;
 
             (Vector3, Vector3) diagonal = (GetPixelPos(area.topLeft), GetPixelPos(area.bottomRight) + (Vector3)xyScaleOffset);
-            
+
             (Vector3, Vector3) topLine = (GetPixelPos(area.topLeft), GetPixelPos(area.topRight) + (Vector3)xScaleOffset);
-            
+
             (Vector3, Vector3) rightLine = (GetPixelPos(area.topRight) + (Vector3)xScaleOffset, GetPixelPos(area.bottomRight) + (Vector3)xyScaleOffset);
-            
+
             (Vector3, Vector3) bottomLine = (GetPixelPos(area.bottomLeft) + (Vector3)yScaleOffset, GetPixelPos(area.bottomRight) + (Vector3)xyScaleOffset);
-            
+
             (Vector3, Vector3) leftLine = (GetPixelPos(area.topLeft), GetPixelPos(area.bottomLeft) + (Vector3)yScaleOffset);
-            
+
             Handles.DrawLine(diagonal.Item1, diagonal.Item2);
             Handles.DrawLine(topLine.Item1, topLine.Item2);
             Handles.DrawLine(rightLine.Item1, rightLine.Item2);
             Handles.DrawLine(bottomLine.Item1, bottomLine.Item2);
-            Handles.DrawLine(leftLine.Item1, leftLine.Item2); 
+            Handles.DrawLine(leftLine.Item1, leftLine.Item2);
         }
     }
 
     private void ResetImage()
     {
         _imageColorGrid = new Color[_texture.width, _texture.height];
+        _textureColorGrid = new Color[_texture.width, _texture.height];
         _boxColorGrid = new Color[_texture.width, _texture.height];
         _triCount = 0;
         _pixelCount = 0;
@@ -109,13 +121,16 @@ public partial class Meshify : EditorWindow
             for (int y = 0; y < _texture.height; y++)
             {
                 _imageColorGrid[x, y] = _texture.GetPixel(x, _texture.height - 1 - y);
+
+                _textureColorGrid[x, y] = _imageColorGrid[x, y];
+                _boxColorGrid[x, y] = _imageColorGrid[x, y];
+
                 if (_imageColorGrid[x, y].a != 0)
                 {
                     _pixelCount++;
                 }
             }
         }
-        _boxColorGrid = _imageColorGrid;
     }
 
     private void DrawImage(Color[,] colorGrid)
@@ -151,15 +166,13 @@ public partial class Meshify : EditorWindow
         return new Vector3(xPos, yPos,0);
     }
 
-    private void DrawAreas()
+    private void DrawAreasByColor()
     {
         foreach (PixelArea area in _areas)
         {
-            Color areaColor = new Color(Random.value, Random.value, Random.value, 1);
-            
             foreach (Vector2Int pixel in area.pixels)
             {
-                _boxColorGrid[pixel.x, pixel.y] = areaColor;
+                _boxColorGrid[pixel.x, pixel.y] = area.color;
             }
         }
         _triCount = _areas.Length * 2;
@@ -239,6 +252,14 @@ public partial class Meshify : EditorWindow
         }
         return range;
     }
+
+    private enum DrawStyle
+    {
+        None,
+        Texture,
+        Solid
+    }
+
 }
 
 public struct PixelArea
@@ -249,21 +270,25 @@ public struct PixelArea
     public Vector2Int bottomLeft;
     public Vector2Int topRight;
     public Vector2Int bottomRight;
-    
+
     public Vector3[] triangleVertices;
+
+    public Color color;
 
     public PixelArea(Vector2Int[] pixels)
     {
-        topLeft = new Vector2Int(pixels[0].x, pixels[0].y); 
-        bottomLeft = new Vector2Int(pixels[0].x, pixels[pixels.Length - 1].y); 
-        topRight = new Vector2Int(pixels[pixels.Length - 1].x, pixels[0].y); 
+        topLeft = new Vector2Int(pixels[0].x, pixels[0].y);
+        bottomLeft = new Vector2Int(pixels[0].x, pixels[pixels.Length - 1].y);
+        topRight = new Vector2Int(pixels[pixels.Length - 1].x, pixels[0].y);
         bottomRight = new Vector2Int(pixels[pixels.Length - 1].x, pixels[pixels.Length - 1].y);
-        
+
         this.pixels = pixels;
 
         Vector3[] topTriangle = { (Vector2)topLeft, (Vector2)topRight, (Vector2)bottomLeft };
         Vector3[] bottomTriangle = { (Vector2)bottomLeft, (Vector2)topRight, (Vector2)bottomRight };
 
         triangleVertices = topTriangle.Concat(bottomTriangle).ToArray();
+
+        color = new Color(Random.value, Random.value, Random.value, 1);
     }
 }
